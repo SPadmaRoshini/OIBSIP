@@ -1,11 +1,30 @@
 import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
+import sqlite3
+import matplotlib.pyplot as plt
+from datetime import datetime
 import time
 
+# Database setup
+conn = sqlite3.connect("bmi_data.db")
+c = conn.cursor()
+
+# Create table for BMI records
+c.execute("""
+CREATE TABLE IF NOT EXISTS bmi_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user TEXT,
+    date TEXT,
+    weight REAL,
+    height REAL,
+    bmi REAL
+)
+""")
+conn.commit()
+
+# BMI calculation and category functions
 def calculate_bmi(weight, height):
-    bmi = weight / (height ** 2)
-    return bmi
+    return round(weight / (height ** 2), 2)
 
 def get_bmi_category(bmi):
     if bmi < 18.5:
@@ -17,112 +36,105 @@ def get_bmi_category(bmi):
     else:
         return "Obese"
 
+# Function to animate widget (enhanced styling)
 def animate_widget(widget, animation, duration=0.1, repeat=2):
+    style_name = widget.winfo_name() + "_TButton"
+    widget_style = ttk.Style()
+
     for i in range(repeat):
-        for style, value in animation:
-            style_name = widget.winfo_name() + "_" + style
-            widget_style.configure(style_name, background=value)
-            widget.configure(style=style_name)
+        for prop, value in animation:
+            style_variant = f"{style_name}.{prop}"
+            widget_style.configure(style_variant, background=value)
+            widget.configure(style=style_variant)
             root.update()
             time.sleep(duration)
 
+# Function to calculate BMI and display results
 def calculate():
     try:
         weight = float(weight_entry.get())
         height = float(height_entry.get())
+        user = user_entry.get()
 
-        if weight <= 0 or height <= 0:
-            raise ValueError("Weight and height must be greater than zero.")
-
-        if weight_unit_var.get() == "lbs":
-            weight = weight * 0.453592
-
-        if height_unit_var.get() == "cm":
-            height = height / 100
-        elif height_unit_var.get() == "feet":
-            height = height * 0.3048
+        if weight <= 0 or height <= 0 or user == "":
+            raise ValueError("Invalid input")
 
         bmi = calculate_bmi(weight, height)
-        bmi_category = get_bmi_category(bmi)
+        category = get_bmi_category(bmi)
 
-        bmi_label.config(text="BMI: {:.2f}".format(bmi))
-        category_label.config(text="Category: {}".format(bmi_category))
+        result_label.config(text=f"BMI: {bmi} ({category})")
+        save_bmi_record(user, weight, height, bmi)
 
-        weight_range = get_weight_range(height)
-        height_range = get_height_range(weight)
+        # Trigger widget animation for result_label
+        animate_widget(result_label, [("background", "lightblue")])
 
-        weight_range_label.config(text="Suggested Weight Range: {:.2f} - {:.2f} kg".format(weight_range[0], weight_range[1]))
-        height_range_label.config(text="Suggested Height Range: {:.2f} - {:.2f} meters".format(height_range[0], height_range[1]))
+    except ValueError:
+        messagebox.showerror("Input Error", "Please provide valid inputs for weight, height, and user.")
 
-        animate_widget(bmi_label, [("background", "pink"), ("background", "SystemButtonFace")])
-        animate_widget(category_label, [("background", "pink"), ("background", "SystemButtonFace")])
-        animate_widget(weight_range_label, [("background", "pink"), ("background", "SystemButtonFace")])
-        animate_widget(height_range_label, [("background", "pink"), ("background", "SystemButtonFace")])
+# Function to save BMI record
+def save_bmi_record(user, weight, height, bmi):
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("INSERT INTO bmi_records (user, date, weight, height, bmi) VALUES (?, ?, ?, ?, ?)",
+              (user, date, weight, height, bmi))
+    conn.commit()
+    messagebox.showinfo("Success", "BMI record saved successfully.")
 
-        animate_widget(calculate_button, [("background", "yellow"), ("background", "#FFFFC5")])
+# Function to view historical data and plot BMI trends
+def view_history():
+    user = user_entry.get()
+    if user == "":
+        messagebox.showerror("Input Error", "Please enter a user name.")
+        return
 
-    except ValueError as e:
-        messagebox.showerror("Input Error", str(e))
+    c.execute("SELECT date, bmi FROM bmi_records WHERE user = ? ORDER BY date", (user,))
+    records = c.fetchall()
 
-def get_weight_range(height):
-    lower_limit = 18.5 * (height ** 2)
-    upper_limit = 24.9 * (height ** 2)
-    return lower_limit, upper_limit
+    if records:
+        dates = [record[0] for record in records]
+        bmis = [record[1] for record in records]
+        plot_bmi_trend(dates, bmis)
+    else:
+        messagebox.showinfo("No Data", "No records found for this user.")
 
-def get_height_range(weight):
-    lower_limit = (weight / 24.9) ** 0.5
-    upper_limit = (weight / 18.5) ** 0.5
-    return lower_limit, upper_limit
+# Function to plot BMI trends
+def plot_bmi_trend(dates, bmis):
+    plt.figure(figsize=(10, 5))
+    plt.plot(dates, bmis, marker="o", linestyle="-", color="b")
+    plt.title("BMI Trend Over Time")
+    plt.xlabel("Date")
+    plt.ylabel("BMI")
+    plt.xticks(rotation=45, ha="right")
+    plt.tight_layout()
+    plt.show()
 
+# Tkinter GUI setup
 root = tk.Tk()
-root.title("BMI Calculator")
-root.geometry("900x500")
-root.configure(bg="#171515")
+root.title("BMI Calculator with History")
+root.geometry("400x350")
 
-# Create a ttk Style
-widget_style = ttk.Style()
-widget_style.configure('TButton', background='#4CAF50', foreground="#171515", font=("Comic Sans MS", 10, "bold"))
-widget_style.map('TButton', background=[('active', '#43A047')])
+# User input
+tk.Label(root, text="User:").grid(row=0, column=0)
+user_entry = tk.Entry(root)
+user_entry.grid(row=0, column=1)
 
-main_frame = ttk.Frame(root, padding="20")
-main_frame.pack(expand=True, fill="both")
+tk.Label(root, text="Weight (kg):").grid(row=1, column=0)
+weight_entry = tk.Entry(root)
+weight_entry.grid(row=1, column=1)
 
-header = ttk.Label(main_frame, text="BMI Calculator", font=("Comic Sans MS", 16, "bold"), background="#4CAF50", foreground="white")
-header.grid(row=0, column=0, columnspan=3, pady=10, sticky="nsew")
+tk.Label(root, text="Height (m):").grid(row=2, column=0)
+height_entry = tk.Entry(root)
+height_entry.grid(row=2, column=1)
 
-weight_label = ttk.Label(main_frame, text="Weight:", font=("Comic Sans MS", 12))
-weight_label.grid(row=1, column=0, sticky="w", padx=10, pady=5)
+# Calculate BMI button
+calculate_button = ttk.Button(root, text="Calculate BMI", command=calculate)
+calculate_button.grid(row=3, column=0, columnspan=2)
 
-weight_entry = tk.Entry(main_frame, font=("Comic Sans MS", 12), relief="solid", borderwidth=1)
-weight_entry.grid(row=1, column=1, padx=10, pady=5)
+# BMI result label
+result_label = ttk.Label(root, text="BMI: ")
+result_label.grid(row=4, column=0, columnspan=2)
 
-weight_unit_var = tk.StringVar(value="kgs")
-weight_unit_combo = ttk.Combobox(main_frame, textvariable=weight_unit_var, values=("kgs", "lbs"), state="readonly", width=5, font=("Helvetica", 12))
-weight_unit_combo.grid(row=1, column=2, padx=10, pady=5)
-
-height_label = ttk.Label(main_frame, text="Height:", font=("Comic Sans MS", 12))
-height_label.grid(row=2, column=0, sticky="w", padx=10, pady=5)
-
-height_entry = tk.Entry(main_frame, font=("Comic Sans MS", 12), relief="solid", borderwidth=1)
-height_entry.grid(row=2, column=1, padx=10, pady=5)
-
-height_unit_var = tk.StringVar(value="meters")
-height_unit_combo = ttk.Combobox(main_frame, textvariable=height_unit_var, values=("meters", "feet", "cm"), state="readonly", width=5, font=("Helvetica", 12))
-height_unit_combo.grid(row=2, column=2, padx=10, pady=5)
-
-calculate_button = ttk.Button(main_frame, text="Calculate", command=calculate, style='TButton')
-calculate_button.grid(row=3, column=0, columnspan=3, pady=10, ipadx=5, ipady=5)
-
-bmi_label = ttk.Label(main_frame, text="BMI: ", font=("Comic Sans MS", 12))
-bmi_label.grid(row=4, column=0, sticky="w", padx=10, pady=5)
-
-category_label = ttk.Label(main_frame, text="Category: ", font=("Comic Sans MS", 12))
-category_label.grid(row=5, column=0, sticky="w", padx=10, pady=5)
-
-weight_range_label = ttk.Label(main_frame, text="Suggested Weight Range: ", font=("Comic Sans MS", 12))
-weight_range_label.grid(row=6, column=0, sticky="w", padx=10, pady=5)
-
-height_range_label = ttk.Label(main_frame, text="Suggested Height Range: ", font=("Comic Sans MS", 12))
-height_range_label.grid(row=7, column=0, sticky="w", padx=10, pady=5)
+# View History button
+view_history_button = ttk.Button(root, text="View History", command=view_history)
+view_history_button.grid(row=5, column=0, columnspan=2)
 
 root.mainloop()
